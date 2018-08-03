@@ -4,6 +4,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 import csv
+import datetime
+import re
 
 
 #Open 3 files -- listing info, review info, user info
@@ -14,7 +16,7 @@ review_file = open('reviews.csv', 'w')
 review_writer = csv.writer(review_file, delimiter="|")
 
 user_file = open('users.csv', 'w')
-user_writer = csv.writer(user_file)
+user_writer = csv.writer(user_file, delimiter="|")
 
 
 
@@ -25,45 +27,8 @@ driver.get("https://www.tripadvisor.com/Attractions-g60763-Activities-New_York_C
 
 
 
-
-###FIND THE LISTINGS
-#initialize listings as an empty list
-listings = []
-
-#loop through the pages of listings and collect all of the links
-#while True:
-for _ in range(0,2):
-	try:
-		page_listings = driver.find_elements_by_xpath('//div[@class="listing_title "]/a')
-
-		if page_listings != []:
-			print('v1 worked')
-		else:
-			print('trying v2')
-			page_listings = driver.find_elements_by_xpath('//a[@class="title ui_header h2"]')
-			print('v2 worked')
-
-		print('found {x} listings'.format(x=len(page_listings)))
-
-
-		page_listings = [listing.get_attribute('href') for listing in page_listings]
-		listings += page_listings
-
-		next_button = driver.find_element_by_xpath('//a[@class="nav next rndBtn ui_button primary taLnk"]')
-		next_button.click()
-
-	except:
-		break
-
-#remove links that are actually subcategories, not specific listings
-listings = [listing for listing in listings if listing.find('Activities') == -1]
-
-
-
-
-
-###GET LISTING INFORMATION
-for listing in listings[0:2]:
+###DEFINE FUNCTION TO GET LISTING INFORMATION
+def scrape_listing(driver, listing):
 	driver.get(listing)
 
 	#get the listing id
@@ -113,6 +78,7 @@ for listing in listings[0:2]:
 	list_dict['list_rating'] = list_rating
 	list_dict['list_review_n'] = list_review_n
 	list_dict['list_loc'] = list_loc
+	list_dict['time_accessed'] = str(datetime.datetime.now())
 	list_writer.writerow(list_dict.values())
 
 	#close the pop-up ad, if it exists. it blocks the user overlay
@@ -125,11 +91,18 @@ for listing in listings[0:2]:
 		pass
 
 
+	get_reviews(driver, list_id)
+
+	for _ in range(0,5):
+		next_reviews_button = driver.find_element_by_xpath('//a[@class="nav next taLnk ui_button primary"]')
+		next_reviews_button.click()
+
+		get_reviews(driver, list_id)
 
 
 
-
-	###GET REVIEWS
+###DEFINE FUNCTION TO GET REVIEWS FROM LISTINGS PAGE
+def get_reviews(driver, list_id):
 	#both page formats have the same review identifier
 	reviews = driver.find_elements_by_xpath('//div[@class="reviewSelector"]')
 
@@ -153,38 +126,14 @@ for listing in listings[0:2]:
 			review_dict['review_stars'] = review_stars
 			review_dict['review_text'] = review_text
 			review_dict['review_is_mobile'] = review_is_mobile
+			review_dict['time_accessed'] = str(datetime.datetime.now())
+			
+
+			user_dict = extract_user_info(driver, review)
+			user_writer.writerow(user_dict.values())
+
+			review_dict['reviewer_username'] = user_dict['username']
 			review_writer.writerow(review_dict.values())
-			
-
-
-
-			#find the user profile and set up the click action
-			reviewer_prof = review.find_element_by_xpath('.//div[@class="memberOverlayLink"]')
-			Click = ActionChains(driver).click(reviewer_prof)
-			
-
-			#click on the profile and wait until it loads; try again if it fails
-			profile_wait = WebDriverWait(driver, 3)
-			try:
-				Click.perform()
-				profile = profile_wait.until(EC.presence_of_element_located((By.XPATH,
-										'//div[@class="memberOverlayRedesign g10n"]')))
-			except:
-				try:
-					Click.perform()
-					profile = profile_wait.until(EC.presence_of_element_located((By.XPATH,
-										'//div[@class="memberOverlayRedesign g10n"]')))
-				except:
-					raise
-					#continue
-
-			#extract user info
-			reviewer_username = driver.find_element_by_xpath('//div[@class="memberOverlayRedesign g10n"]/a').get_attribute('href')
-			print(reviewer_username)
-
-			#move mouse elsewhere to close the user profile
-			#random_space = review.find_element_by_xpath('.//span[@class="ratingDate relativeDate"]')
-			ActionChains(driver).move_by_offset(-15, 0)
 
 
 
@@ -208,37 +157,208 @@ for listing in listings[0:2]:
 			review_dict['review_stars'] = review_stars
 			review_dict['review_text'] = review_text
 			review_dict['review_is_mobile'] = review_is_mobile
-			review_writer.writerow(review_dict.values())
+			review_dict['time_accessed'] = str(datetime.datetime.now())
 			
 
+			user_dict = extract_user_info(driver, review)
+			user_writer.writerow(user_dict.values())
+
+			review_dict['reviewer_username'] = user_dict['username']
+			review_writer.writerow(review_dict.values())
 
 
-			#find the user profile and set up the click action
-			reviewer_prof = review.find_element_by_xpath('.//div[@class="memberOverlayLink clickable"]')
-			Click = ActionChains(driver).click(reviewer_prof)
 
-			#click on the profile and wait until it loads; try again if it fails
-			profile_wait = WebDriverWait(driver, 3)
-			try:
-				Click.perform()
-				profile = profile_wait.until(EC.presence_of_element_located((By.XPATH,
-									'//div[@class="memberOverlayRedesign g10n"]')))
-			except:
-				try:
-					Click.perform()
-					profile = profile_wait.until(EC.presence_of_element_located((By.XPATH,
-										'//div[@class="memberOverlayRedesign g10n"]')))	
-				except:
-					raise
-					#continue
 
-			#extract user info
-			reviewer_username = driver.find_element_by_xpath('//div[@class="memberOverlayRedesign g10n"]/a').get_attribute('href')
-			print(reviewer_username)
 
-			#click elsewhere to close the user profile
-			#random_space = review.find_element_by_xpath('.//span[@class="ratingDate relativeDate"]')
-			ActionChains(driver).move_by_offset(-15, 0)
+
+
+###DEFINE FUNCTION TO EXTRACT INFO FROM THE USER PROFILES
+def extract_user_info(driver, review):
+
+	#find the user profile and set up the click action
+	reviewer_prof = review.find_element_by_xpath('.//div[contains(@class,"memberOverlayLink")]')
+	Click = ActionChains(driver).click(reviewer_prof)
+
+	#click on the profile and wait until it loads; try again if it fails
+	profile_wait = WebDriverWait(driver, 3)
+	try:
+		Click.perform()
+		profile = profile_wait.until(EC.presence_of_element_located((By.XPATH,
+								'//div[@class="memberOverlayRedesign g10n"]')))
+	except:
+		return None
+
+
+	#extract user info
+	#username
+	reviewer_link = driver.find_element_by_xpath('//div[@class="memberOverlayRedesign g10n"]/a').get_attribute('href')
+	reviewer_username = re.sub('.*members/', '', reviewer_link)
+
+	#demos
+	reviewer_demos = driver.find_elements_by_xpath('//ul[@class="memberdescriptionReviewEnhancements"]/*')
+	reviewer_demos = [element.text for element in reviewer_demos]
+	reviewer_demos = ";".join(reviewer_demos)
+	
+	#reviewer rating histogram
+	histogram_rows = driver.find_elements_by_xpath('//div[@class="chartRowReviewEnhancements"]')
+	review_hist = []
+	for row in histogram_rows:
+		n_reviews = row.find_element_by_xpath('./span[3]').text
+		review_hist += [n_reviews]
+	review_hist = ";".join(review_hist)
+
+	#reviewer helpful votes
+	try:
+		helpvotes = driver.find_element_by_xpath(
+			'//div[@class="memberOverlayRedesign g10n"]//*[contains(text(), "Helpful votes")]').text
+	except:
+		helpvotes = None
+
+	#reviewer cities visited
+	try:
+		n_cities_visited = driver.find_element_by_xpath(
+			'//div[@class="memberOverlayRedesign g10n"]//*[contains(text(), "Cities visited")]').text
+	except:
+		n_cities_visited = None
+
+	#reviewer tags
+	tags = driver.find_elements_by_xpath('//a[@class="memberTagReviewEnhancements"]')
+	tags = [tag.text for tag in tags]
+	tags = ";".join(tags)
+
+
+	#build dict item
+	user_dict = {}
+	user_dict['username'] = reviewer_username
+	user_dict['demos'] = reviewer_demos
+	user_dict['review_hist'] = review_hist
+	user_dict['helpvotes'] = helpvotes
+	user_dict['n_cities_visited'] = n_cities_visited
+	user_dict['tags'] = tags
+	user_dict['time_accessed'] = str(datetime.datetime.now())
+
+
+	#close the user profile -- make sure it's closed before moving on
+	close_profile_button = driver.find_element_by_xpath('//span[@class="ui_overlay ui_popover arrow_left "]/div[@class="ui_close_x"]')
+	close_profile_button.click()
+	profile_wait.until_not(EC.presence_of_element_located((By.XPATH,
+								'//div[@class="memberOverlayRedesign g10n"]')))
+
+	return user_dict
+
+
+
+
+
+
+
+###FIND THE LISTINGS
+#initialize listings as an empty list
+listings = []
+
+#loop through the pages of listings and collect all of the links
+#while True:
+for _ in range(0,2):
+	try:
+		print('started listings page {n}'.format(n=_+1))
+		listings = driver.find_elements_by_xpath('//div[@class="listing_title "]/a')
+
+		if listings == []:
+			listings = driver.find_elements_by_xpath('//a[@class="title ui_header h2"]')
+
+		listings = [listing.get_attribute('href') for listing in listings]
+
+		#remove links that are actually subcategories, not specific listings
+		listings = [listing for listing in listings if listing.find('Activities') == -1]
+
+		for listing in listings:
+			scrape_listing(driver, listing)
+
+		next_button = driver.find_element_by_xpath('//a[@class="nav next rndBtn ui_button primary taLnk"]')
+		next_button.click()
+		print('+'*50)
+
+	except:
+		break
+
+
+
+
+
+
+
+
+
+
+
+
+
+	# ###GET REVIEWS
+	# #both page formats have the same review identifier
+	# reviews = driver.find_elements_by_xpath('//div[@class="reviewSelector"]')
+
+	# #try page format 1
+	# try:
+	# 	for review in reviews:
+	# 		review_stars = review.find_element_by_xpath('.//div[@class="rating reviewItemInline"]/span').get_attribute('class')
+	# 		review_title = review.find_element_by_xpath('.//div[@class="quote isNew"]/a/span').text
+	# 		review_date = review.find_element_by_xpath('.//span[@class="ratingDate relativeDate"]').get_attribute('title')
+	# 		review_text = review.find_element_by_xpath('.//p[@class="partial_entry"]').text
+	# 		#checks if the mobile symbol is there; if not, returns false
+	# 		try:
+	# 			review_is_mobile = review.find_element_by_xpath('.//span[@class="viaMobile"]') != None
+	# 		except:
+	# 			review_is_mobile = False
+
+	# 		review_dict = {}
+	# 		review_dict['list_id'] = list_id
+	# 		review_dict['review_title'] = review_title
+	# 		review_dict['review_date'] = review_date
+	# 		review_dict['review_stars'] = review_stars
+	# 		review_dict['review_text'] = review_text
+	# 		review_dict['review_is_mobile'] = review_is_mobile
+	# 		review_dict['time_accessed'] = str(datetime.datetime.now())
+			
+
+	# 		user_dict = extract_user_info(driver, review)
+	# 		user_writer.writerow(user_dict.values())
+
+	# 		review_dict['reviewer_username'] = user_dict['username']
+	# 		review_writer.writerow(review_dict.values())
+
+
+
+	# #try page format 2
+	# except:
+	# 	for review in reviews:
+	# 		review_stars = review.find_element_by_xpath('.//div[@class="ui_column is-9"]/span').get_attribute('class')
+	# 		review_title = review.find_element_by_xpath('.//div[@class="quote isNew"]/a/span').text
+	# 		review_date = review.find_element_by_xpath('.//span[@class="ratingDate"]').get_attribute('title')
+	# 		review_text = review.find_element_by_xpath('.//p[@class="partial_entry"]').text
+	# 		#checks if the mobile symbol is there; if not, returns false
+	# 		try:
+	# 			review_is_mobile = review.find_element_by_xpath('.//span[@class="viaMobile"]') != None
+	# 		except:
+	# 			review_is_mobile = False
+
+	# 		review_dict = {}
+	# 		review_dict['list_id'] = list_id
+	# 		review_dict['review_title'] = review_title
+	# 		review_dict['review_date'] = review_date
+	# 		review_dict['review_stars'] = review_stars
+	# 		review_dict['review_text'] = review_text
+	# 		review_dict['review_is_mobile'] = review_is_mobile
+	# 		review_dict['time_accessed'] = str(datetime.datetime.now())
+			
+
+	# 		user_dict = extract_user_info(driver, review)
+	# 		user_writer.writerow(user_dict.values())
+
+	# 		review_dict['reviewer_username'] = user_dict['username']
+	# 		review_writer.writerow(review_dict.values())
+
+
+
 
 
 
