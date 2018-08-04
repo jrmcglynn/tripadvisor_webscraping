@@ -3,9 +3,11 @@ from selenium.webdriver import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
+import time
 import csv
 import datetime
 import re
+import random
 
 
 #Open 3 files -- listing info, review info, user info
@@ -20,6 +22,7 @@ user_writer = csv.writer(user_file, delimiter="|")
 
 
 
+
 #Load web driver
 driver = webdriver.Chrome()
 driver.get("https://www.tripadvisor.com/Attractions-g60763-Activities-New_York_City_New_York.html")
@@ -28,7 +31,7 @@ driver.get("https://www.tripadvisor.com/Attractions-g60763-Activities-New_York_C
 
 
 ###DEFINE FUNCTION TO GET LISTING INFORMATION
-def scrape_listing(driver, listing):
+def scrape_listing(driver, listing, n_review_pages):
 	driver.get(listing)
 
 	#get the listing id
@@ -41,7 +44,7 @@ def scrape_listing(driver, listing):
 		list_rating = header.find_element_by_xpath('.//div[@class="rs rating"]/div/span[1]').get_attribute('alt')
 		list_review_n = header.find_element_by_xpath('.//span[@property="count"]').text
 
-		#there are different address types for different types of listings. this covers a few, otherwise gets None
+		#there are different location types for different types of listings. this covers a few, otherwise gets None
 		try:
 			list_loc = driver.find_element_by_xpath('//span[@class="extended-address"]').text
 		except:
@@ -81,43 +84,88 @@ def scrape_listing(driver, listing):
 	list_dict['time_accessed'] = str(datetime.datetime.now())
 	list_writer.writerow(list_dict.values())
 
+
+
+	#loop over the review pages and get reviews
+
+	#define a wait for the next page
+	next_page_wait = WebDriverWait(driver, 10)
+
+	for _ in range(0, n_review_pages):
+		#get review info
+		print('starting page {n}'.format(n=_+1))
+		get_reviews(driver, list_id)
+		print('finished page {n}'.format(n=_+1), '\n', '#'*40)
+
+
+		#stop if we've reached the end
+		if driver.find_elements_by_xpath('//a[class="nav next ui_button primary disabled"]') != []:
+			break
+
+		#otherwise go to the next page of reviews
+		else:
+			#identify first review ID (we can use this later to make sure we've moved to the next page)
+			first_review = driver.find_element_by_xpath('//div[@class="reviewSelector"]')
+
+			#find and click on the next review button
+			next_reviews_button = driver.find_element_by_xpath('//a[@class="nav next taLnk ui_button primary"]')
+			next_reviews_button.click()
+			print('clicked to review page {n}'.format(n=_+2))
+
+			#wait until the next page loads
+			try:
+				next_page_wait.until(EC.staleness_of(first_review))
+				#next_page_wait.until(EC.presence_of_element_located((By.XPATH,
+				#					'//div[@class="reviewSelector" and @id={id}]'.format(id=first_review))))
+			except:
+				print("PAGE DIDN'T LOAD!!!")
+			print('next page loaded')
+		
+
+
+
+
+
+###DEFINE FUNCTION TO GET REVIEWS FROM ONE PAGE OF REVIEWS
+def get_reviews(driver, list_id):
+	print('scraping review page')
+
+
+
 	#close the pop-up ad, if it exists. it blocks the user overlay
 	try:
 		close_button = driver.find_element_by_xpath(
 			'//div[@class="slide_up_messaging_container large"]/span[@class="close ui_icon times"]')
 		print('found close button')
 		close_button.click()
-	except:
+		print('I think I clicked it!')
+	except Exception as e:
+		print('thank god, tripadvisor didn\'t try to show me an ad')
 		pass
 
 
-	get_reviews(driver, list_id)
 
-	for _ in range(0,5):
-		next_reviews_button = driver.find_element_by_xpath('//a[@class="nav next taLnk ui_button primary"]')
-		next_reviews_button.click()
-
-		get_reviews(driver, list_id)
-
-
-
-###DEFINE FUNCTION TO GET REVIEWS FROM LISTINGS PAGE
-def get_reviews(driver, list_id):
 	#both page formats have the same review identifier
 	reviews = driver.find_elements_by_xpath('//div[@class="reviewSelector"]')
+
+	print('I found {n} reviews!'.format(n=len(reviews)))
 
 	#try page format 1
 	try:
 		for review in reviews:
+
 			review_stars = review.find_element_by_xpath('.//div[@class="rating reviewItemInline"]/span').get_attribute('class')
-			review_title = review.find_element_by_xpath('.//div[@class="quote isNew"]/a/span').text
+			print('started scraping review')
+			review_title = review.find_element_by_xpath('.//div[contains(@class, "quote")]/a/span').text
 			review_date = review.find_element_by_xpath('.//span[@class="ratingDate relativeDate"]').get_attribute('title')
 			review_text = review.find_element_by_xpath('.//p[@class="partial_entry"]').text
+
 			#checks if the mobile symbol is there; if not, returns false
 			try:
 				review_is_mobile = review.find_element_by_xpath('.//span[@class="viaMobile"]') != None
 			except:
 				review_is_mobile = False
+
 
 			review_dict = {}
 			review_dict['list_id'] = list_id
@@ -129,21 +177,31 @@ def get_reviews(driver, list_id):
 			review_dict['time_accessed'] = str(datetime.datetime.now())
 			
 
+			print('scraping user')
 			user_dict = extract_user_info(driver, review)
 			user_writer.writerow(user_dict.values())
+			print('user scraped')
+
 
 			review_dict['reviewer_username'] = user_dict['username']
 			review_writer.writerow(review_dict.values())
+
+
+			print('review scraped', '\n', '$'*10)
+
 
 
 
 	#try page format 2
 	except:
 		for review in reviews:
+
 			review_stars = review.find_element_by_xpath('.//div[@class="ui_column is-9"]/span').get_attribute('class')
-			review_title = review.find_element_by_xpath('.//div[@class="quote isNew"]/a/span').text
+			print('started scraping review')
+			review_title = review.find_element_by_xpath('.//div[contains(@class, "quote")]/a/span').text
 			review_date = review.find_element_by_xpath('.//span[@class="ratingDate"]').get_attribute('title')
 			review_text = review.find_element_by_xpath('.//p[@class="partial_entry"]').text
+
 			#checks if the mobile symbol is there; if not, returns false
 			try:
 				review_is_mobile = review.find_element_by_xpath('.//span[@class="viaMobile"]') != None
@@ -160,11 +218,17 @@ def get_reviews(driver, list_id):
 			review_dict['time_accessed'] = str(datetime.datetime.now())
 			
 
+			print('scraping user')
 			user_dict = extract_user_info(driver, review)
 			user_writer.writerow(user_dict.values())
+			print('user scraped')
+
 
 			review_dict['reviewer_username'] = user_dict['username']
 			review_writer.writerow(review_dict.values())
+
+
+			print('review scraped', '\n', '$'*10)
 
 
 
@@ -174,6 +238,8 @@ def get_reviews(driver, list_id):
 
 ###DEFINE FUNCTION TO EXTRACT INFO FROM THE USER PROFILES
 def extract_user_info(driver, review):
+
+	user_dict = {}
 
 	#find the user profile and set up the click action
 	reviewer_prof = review.find_element_by_xpath('.//div[contains(@class,"memberOverlayLink")]')
@@ -186,7 +252,8 @@ def extract_user_info(driver, review):
 		profile = profile_wait.until(EC.presence_of_element_located((By.XPATH,
 								'//div[@class="memberOverlayRedesign g10n"]')))
 	except:
-		return None
+		user_dict['username'] = None
+		return user_dict
 
 
 	#extract user info
@@ -228,7 +295,6 @@ def extract_user_info(driver, review):
 
 
 	#build dict item
-	user_dict = {}
 	user_dict['username'] = reviewer_username
 	user_dict['demos'] = reviewer_demos
 	user_dict['review_hist'] = review_hist
@@ -241,8 +307,7 @@ def extract_user_info(driver, review):
 	#close the user profile -- make sure it's closed before moving on
 	close_profile_button = driver.find_element_by_xpath('//span[@class="ui_overlay ui_popover arrow_left "]/div[@class="ui_close_x"]')
 	close_profile_button.click()
-	profile_wait.until_not(EC.presence_of_element_located((By.XPATH,
-								'//div[@class="memberOverlayRedesign g10n"]')))
+	profile_wait.until_not(EC.presence_of_element_located((By.XPATH, '//span[@class="ui_overlay ui_popover arrow_left "]')))
 
 	return user_dict
 
@@ -252,130 +317,51 @@ def extract_user_info(driver, review):
 
 
 
-###FIND THE LISTINGS
-#initialize listings as an empty list
-listings = []
+###FIND THE LISTINGS=
 
 #loop through the pages of listings and collect all of the links
-#while True:
+listings = []
 for _ in range(0,2):
 	try:
 		print('started listings page {n}'.format(n=_+1))
-		listings = driver.find_elements_by_xpath('//div[@class="listing_title "]/a')
+		page_listings = driver.find_elements_by_xpath('//div[@class="listing_title "]/a')
 
-		if listings == []:
-			listings = driver.find_elements_by_xpath('//a[@class="title ui_header h2"]')
+		if page_listings == []:
+			page_listings = driver.find_elements_by_xpath('//a[@class="title ui_header h2"]')
 
-		listings = [listing.get_attribute('href') for listing in listings]
+		page_listings = [listing.get_attribute('href') for listing in page_listings]
+		listings += page_listings
 
-		#remove links that are actually subcategories, not specific listings
-		listings = [listing for listing in listings if listing.find('Activities') == -1]
+		try:
+			next_button = driver.find_element_by_xpath('//a[@class="nav next rndBtn ui_button primary taLnk"]')
+			next_button.click()
+			print('+'*50)
+		except Exception as e:
+			print(e, 'Error trying to go to the next page')
 
-		for listing in listings:
-			scrape_listing(driver, listing)
 
-		next_button = driver.find_element_by_xpath('//a[@class="nav next rndBtn ui_button primary taLnk"]')
-		next_button.click()
-		print('+'*50)
-
-	except:
+	except Exception as e:
+		print(e, 'Error... uh not sure yet')
 		break
 
+#remove links that are actually subcategories, not specific listings
+listings = [listing for listing in listings if listing.find('Activities') == -1]
 
+#get top 5
+top_5 = listings[0:5]
 
+#get a random 5 outside of the top 5
+random.seed(100)
+rest = listings[5:]
+random.shuffle(rest)
+sample = rest[0:5]
 
+#combine top 5 with sample
+target_listings = top_5 + sample
 
-
-
-
-
-
-
-
-
-	# ###GET REVIEWS
-	# #both page formats have the same review identifier
-	# reviews = driver.find_elements_by_xpath('//div[@class="reviewSelector"]')
-
-	# #try page format 1
-	# try:
-	# 	for review in reviews:
-	# 		review_stars = review.find_element_by_xpath('.//div[@class="rating reviewItemInline"]/span').get_attribute('class')
-	# 		review_title = review.find_element_by_xpath('.//div[@class="quote isNew"]/a/span').text
-	# 		review_date = review.find_element_by_xpath('.//span[@class="ratingDate relativeDate"]').get_attribute('title')
-	# 		review_text = review.find_element_by_xpath('.//p[@class="partial_entry"]').text
-	# 		#checks if the mobile symbol is there; if not, returns false
-	# 		try:
-	# 			review_is_mobile = review.find_element_by_xpath('.//span[@class="viaMobile"]') != None
-	# 		except:
-	# 			review_is_mobile = False
-
-	# 		review_dict = {}
-	# 		review_dict['list_id'] = list_id
-	# 		review_dict['review_title'] = review_title
-	# 		review_dict['review_date'] = review_date
-	# 		review_dict['review_stars'] = review_stars
-	# 		review_dict['review_text'] = review_text
-	# 		review_dict['review_is_mobile'] = review_is_mobile
-	# 		review_dict['time_accessed'] = str(datetime.datetime.now())
-			
-
-	# 		user_dict = extract_user_info(driver, review)
-	# 		user_writer.writerow(user_dict.values())
-
-	# 		review_dict['reviewer_username'] = user_dict['username']
-	# 		review_writer.writerow(review_dict.values())
-
-
-
-	# #try page format 2
-	# except:
-	# 	for review in reviews:
-	# 		review_stars = review.find_element_by_xpath('.//div[@class="ui_column is-9"]/span').get_attribute('class')
-	# 		review_title = review.find_element_by_xpath('.//div[@class="quote isNew"]/a/span').text
-	# 		review_date = review.find_element_by_xpath('.//span[@class="ratingDate"]').get_attribute('title')
-	# 		review_text = review.find_element_by_xpath('.//p[@class="partial_entry"]').text
-	# 		#checks if the mobile symbol is there; if not, returns false
-	# 		try:
-	# 			review_is_mobile = review.find_element_by_xpath('.//span[@class="viaMobile"]') != None
-	# 		except:
-	# 			review_is_mobile = False
-
-	# 		review_dict = {}
-	# 		review_dict['list_id'] = list_id
-	# 		review_dict['review_title'] = review_title
-	# 		review_dict['review_date'] = review_date
-	# 		review_dict['review_stars'] = review_stars
-	# 		review_dict['review_text'] = review_text
-	# 		review_dict['review_is_mobile'] = review_is_mobile
-	# 		review_dict['time_accessed'] = str(datetime.datetime.now())
-			
-
-	# 		user_dict = extract_user_info(driver, review)
-	# 		user_writer.writerow(user_dict.values())
-
-	# 		review_dict['reviewer_username'] = user_dict['username']
-	# 		review_writer.writerow(review_dict.values())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#scrape scrape scrape
+for listing in target_listings[0:2]:
+	scrape_listing(driver, listing, 2)
 
 
 
