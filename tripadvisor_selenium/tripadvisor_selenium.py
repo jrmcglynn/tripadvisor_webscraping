@@ -41,44 +41,54 @@ def scrape_listing(driver, listing, n_review_pages):
 	try:
 		list_name = driver.find_element_by_xpath('//h1[@class="heading_title"]').text
 		header = driver.find_element_by_xpath('//div[@class="rating_and_popularity"]')
-		list_rating = header.find_element_by_xpath('.//div[@class="rs rating"]/div/span[1]').get_attribute('alt')
-		list_review_n = header.find_element_by_xpath('.//span[@property="count"]').text
-
-		#there are different location types for different types of listings. this covers a few, otherwise gets None
-		try:
-			list_loc = driver.find_element_by_xpath('//span[@class="extended-address"]').text
+		try: #listings with few ratings don't get an overall rating or rating count
+			list_rating = header.find_element_by_xpath('.//div[@class="rs rating"]/div/span[1]').get_attribute('alt')
+			list_review_n = header.find_element_by_xpath('.//span[@property="count"]').text
 		except:
-			try:
-				list_loc = driver.find_element_by_xpath('//span[@class="street-address"]').text
-			except:
-				try:
-					list_loc = driver.find_element_by_xpath('//div[@class="detail_section neighborhood"]').text
-				except:
-					list_loc = None
+			list_rating, list_review_n = None, None
+		list_type = header.find_elements_by_xpath('//span[@class="header_detail attraction_details"]/div/a')
+		list_type = [a.text for a in list_type]
+		list_type = ";".join(list_type)
+		
+
 
 	#there are two versions of the page... trying the 2nd version! 
 	except:
 		list_name = driver.find_element_by_xpath('//h1[@class="ui_header h1"]').text
 		header = driver.find_element_by_xpath('//div[@class="headerInfoWrapper"]')
-		list_rating = header.find_element_by_xpath('.//a[@href="#REVIEWS"]/div/span[1]').get_attribute('alt')
-		list_review_n = header.find_element_by_xpath('.//span[@class="reviewCount"]').text
-
-		#there are different address types for different types of listings. this covers a few, otherwise gets None
-		try:
-			list_loc = driver.find_element_by_xpath('//span[@class="extended-address"]').text
+		try: #listings with few ratings don't get an overall rating or rating count
+			list_rating = header.find_element_by_xpath('.//a[@href="#REVIEWS"]/div/span[1]').get_attribute('alt')
+			list_review_n = header.find_element_by_xpath('.//span[@class="reviewCount"]').text
 		except:
-			try:
-				list_loc = driver.find_element_by_xpath('//span[@class="street-address"]').text
-			except:
-				try:
-					list_loc = driver.find_element_by_xpath('//div[@class="detail_section neighborhood"]').text
-				except:
-					list_loc = None
+			list_rating, list_review_n = None, None
+		list_type = header.find_elements_by_xpath('//span[@class="header_detail attraction_details"]/div/a')
+		list_type = [a.text for a in list_type]
+		list_type = ";".join(list_type)
+
+
+
+	#a couple things are the same on both page formats -- getting those here
+	#review histogram
+	histogram_rows = driver.find_elements_by_xpath('//ul[@class="ratings_chart"]/li')
+	list_rating_hist = []
+	for row in histogram_rows:
+		pct_reviews = row.find_element_by_xpath('./span[3]').text
+		list_rating_hist += [pct_reviews]
+	list_rating_hist = ";".join(list_rating_hist)
+
+	#location
+	list_loc = driver.find_elements_by_xpath('//div[@class="detail_section address"]/span[not(@class="ui_icon map-pin")]')
+	list_loc = [a.text for a in list_loc]
+	list_loc = ";".join(list_loc)
+
+
 
 	#write out the listing details
 	list_dict = {}
 	list_dict['list_id'] = list_id
+	list_dict['list_name'] = list_name
 	list_dict['list_rating'] = list_rating
+	list_dict['list_rating_hist'] = list_rating_hist
 	list_dict['list_review_n'] = list_review_n
 	list_dict['list_loc'] = list_loc
 	list_dict['time_accessed'] = str(datetime.datetime.now())
@@ -91,35 +101,38 @@ def scrape_listing(driver, listing, n_review_pages):
 	#define a wait for the next page
 	next_page_wait = WebDriverWait(driver, 10)
 
-	for _ in range(0, n_review_pages):
-		#get review info
-		print('starting page {n}'.format(n=_+1))
+	for i in range(0, n_review_pages):
+		#get reviews
+		print('starting page {n}'.format(n=i+1))
 		get_reviews(driver, list_id)
-		print('finished page {n}'.format(n=_+1), '\n', '#'*40)
+		print('finished page {n}'.format(n=i+1), '\n', '#'*40)
 
 
-		#stop if we've reached the end
-		if driver.find_elements_by_xpath('//a[class="nav next ui_button primary disabled"]') != []:
-			break
+		#move on to the next page?
+		#identify first review ID (we can use this later to make sure we've moved to the next page)
+		first_review = driver.find_element_by_xpath('//div[@class="reviewSelector"]')
 
-		#otherwise go to the next page of reviews
-		else:
-			#identify first review ID (we can use this later to make sure we've moved to the next page)
-			first_review = driver.find_element_by_xpath('//div[@class="reviewSelector"]')
 
-			#find and click on the next review button
+		#try to click to the next page
+		try:
+			#find and click on the next review page button
+			print('about to look for the next review page button')
 			next_reviews_button = driver.find_element_by_xpath('//a[@class="nav next taLnk ui_button primary"]')
+			print('found the next page button')
 			next_reviews_button.click()
-			print('clicked to review page {n}'.format(n=_+2))
+			print('clicked to review page {n}'.format(n=i+2))
 
 			#wait until the next page loads
-			try:
-				next_page_wait.until(EC.staleness_of(first_review))
-				#next_page_wait.until(EC.presence_of_element_located((By.XPATH,
-				#					'//div[@class="reviewSelector" and @id={id}]'.format(id=first_review))))
-			except:
-				print("PAGE DIDN'T LOAD!!!")
+			next_page_wait.until(EC.staleness_of(first_review))
 			print('next page loaded')
+			
+
+		#if the click fails, it's probably because we reached the last review page. break the loop.
+		except Exception as e:
+			print(e)
+			print('reached the last review page!')
+			break
+
 		
 
 
@@ -136,7 +149,7 @@ def get_reviews(driver, list_id):
 	try:
 		close_button = driver.find_element_by_xpath(
 			'//div[@class="slide_up_messaging_container large"]/span[@class="close ui_icon times"]')
-		print('found close button')
+		print('ugh... I hate ads.found close button')
 		close_button.click()
 		print('I think I clicked it!')
 	except Exception as e:
@@ -154,7 +167,7 @@ def get_reviews(driver, list_id):
 	try:
 		for review in reviews:
 
-			review_stars = review.find_element_by_xpath('.//div[@class="rating reviewItemInline"]/span').get_attribute('class')
+			review_rating = review.find_element_by_xpath('.//div[@class="rating reviewItemInline"]/span').get_attribute('class')
 			print('started scraping review')
 			review_title = review.find_element_by_xpath('.//div[contains(@class, "quote")]/a/span').text
 			review_date = review.find_element_by_xpath('.//span[@class="ratingDate relativeDate"]').get_attribute('title')
@@ -171,7 +184,7 @@ def get_reviews(driver, list_id):
 			review_dict['list_id'] = list_id
 			review_dict['review_title'] = review_title
 			review_dict['review_date'] = review_date
-			review_dict['review_stars'] = review_stars
+			review_dict['review_rating'] = review_rating
 			review_dict['review_text'] = review_text
 			review_dict['review_is_mobile'] = review_is_mobile
 			review_dict['time_accessed'] = str(datetime.datetime.now())
@@ -196,7 +209,7 @@ def get_reviews(driver, list_id):
 	except:
 		for review in reviews:
 
-			review_stars = review.find_element_by_xpath('.//div[@class="ui_column is-9"]/span').get_attribute('class')
+			review_rating = review.find_element_by_xpath('.//div[@class="ui_column is-9"]/span').get_attribute('class')
 			print('started scraping review')
 			review_title = review.find_element_by_xpath('.//div[contains(@class, "quote")]/a/span').text
 			review_date = review.find_element_by_xpath('.//span[@class="ratingDate"]').get_attribute('title')
@@ -212,7 +225,7 @@ def get_reviews(driver, list_id):
 			review_dict['list_id'] = list_id
 			review_dict['review_title'] = review_title
 			review_dict['review_date'] = review_date
-			review_dict['review_stars'] = review_stars
+			review_dict['review_rating'] = review_rating
 			review_dict['review_text'] = review_text
 			review_dict['review_is_mobile'] = review_is_mobile
 			review_dict['time_accessed'] = str(datetime.datetime.now())
@@ -241,11 +254,18 @@ def extract_user_info(driver, review):
 
 	user_dict = {}
 
-	#find the user profile and set up the click action
-	reviewer_prof = review.find_element_by_xpath('.//div[contains(@class,"memberOverlayLink")]')
-	Click = ActionChains(driver).click(reviewer_prof)
+	#find the user profile and set up the click action;
+	try:
+		reviewer_prof = review.find_element_by_xpath('.//div[contains(@class,"memberOverlayLink")]')
+		Click = ActionChains(driver).click(reviewer_prof)
 
-	#click on the profile and wait until it loads; try again if it fails
+	#if that fails, it's probably because the user has no account (probably deleted?)
+	except:
+		user_dict['username'] = 'no account'
+		return user_dict
+	
+
+	#click on the profile and wait until it loads
 	profile_wait = WebDriverWait(driver, 3)
 	try:
 		Click.perform()
@@ -321,9 +341,9 @@ def extract_user_info(driver, review):
 
 #loop through the pages of listings and collect all of the links
 listings = []
-for _ in range(0,2):
+for i in range(0,2):
 	try:
-		print('started listings page {n}'.format(n=_+1))
+		print('started listings page {n}'.format(n=i+1))
 		page_listings = driver.find_elements_by_xpath('//div[@class="listing_title "]/a')
 
 		if page_listings == []:
@@ -344,23 +364,25 @@ for _ in range(0,2):
 		print(e, 'Error... uh not sure yet')
 		break
 
-#remove links that are actually subcategories, not specific listings
-listings = [listing for listing in listings if listing.find('Activities') == -1]
+#remove links that are actually subcategories, not specific listings, based on the URL string
+listings = list(filter(lambda l: l.find('Activities') == -1, listings))
+#[listing for listing in listings if listing.find('Activities') == -1]
 
-#get top 5
-top_5 = listings[0:5]
+#get top 10
+top_10 = listings[0:10]
 
-#get a random 5 outside of the top 5
+#get a random 10 outside of the top 10
+rest = listings[10:]
 random.seed(100)
-rest = listings[5:]
 random.shuffle(rest)
-sample = rest[0:5]
+sample = rest[0:10]
 
-#combine top 5 with sample
-target_listings = top_5 + sample
+#combine top 10 with sample
+target_listings = top_10 + sample
+print(target_listings)
 
 #scrape scrape scrape
-for listing in target_listings[0:2]:
+for listing in target_listings:
 	scrape_listing(driver, listing, 2)
 
 
