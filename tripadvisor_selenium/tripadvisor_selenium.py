@@ -383,7 +383,7 @@ print(target_listings)
 
 #scrape scrape scrape
 for listing in target_listings:
-	scrape_listing(driver, listing, 100)
+	scrape_listing(driver, listing, 1000)
 
 
 
